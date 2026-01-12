@@ -1,7 +1,8 @@
 import logging
-from telegram import Update
-from telegram.ext import ContextTypes
-from telegram.error import TelegramError
+from pyrogram import Client
+from pyrogram.types import Message
+from pyrogram.errors import FloodWait
+import asyncio
 
 from storage import storage
 
@@ -13,14 +14,54 @@ def is_admin(user_id: int) -> bool:
     return storage.admin_id is None or user_id == storage.admin_id
 
 
+def register_handlers(app: Client):
+    """注册所有处理器"""
+
+    @app.on_message()
+    async def handle_all_messages(client: Client, message: Message):
+        """处理所有消息"""
+        # 检查是否是命令
+        if message.text and message.text.startswith("/"):
+            await handle_command(client, message)
+        else:
+            await forward_message(client, message)
+
+
+async def handle_command(client: Client, message: Message):
+    """处理命令"""
+    text = message.text.strip()
+    parts = text.split(maxsplit=1)
+    command = parts[0].lower().split("@")[0]  # 移除 @botname
+    args = parts[1] if len(parts) > 1 else ""
+
+    user_id = message.from_user.id if message.from_user else 0
+
+    if command == "/start" or command == "/help":
+        await cmd_start(client, message)
+    elif command == "/setadmin":
+        await cmd_setadmin(client, message, user_id)
+    elif command == "/setsource":
+        await cmd_setsource(client, message, user_id)
+    elif command == "/settarget":
+        await cmd_settarget(client, message, user_id)
+    elif command == "/adduser":
+        await cmd_adduser(client, message, user_id, args)
+    elif command == "/removeuser":
+        await cmd_removeuser(client, message, user_id, args)
+    elif command == "/listusers":
+        await cmd_listusers(client, message, user_id)
+    elif command == "/status":
+        await cmd_status(client, message, user_id)
+
+
 # ============ 管理命令 ============
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_start(client: Client, message: Message):
     """开始命令 - 显示帮助"""
     help_text = """
-🤖 *Telegram 转发 Bot*
+🤖 **Telegram 转发 Bot (用户模式)**
 
-*命令列表:*
+**命令列表:**
 /setadmin - 设置自己为管理员（仅首次）
 /setsource - 设置源群组（在源群中发送）
 /settarget - 设置目标群组（在目标群中发送）
@@ -30,118 +71,114 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 /status - 查看当前配置
 /help - 显示此帮助
 
-*使用流程:*
-1. 私聊发送 /setadmin 设置管理员
+**使用流程:**
+1. 私聊自己发送 /setadmin 设置管理员
 2. 在源群发送 /setsource
 3. 在目标群发送 /settarget
 4. 用 /adduser @xxx 添加要监控的用户
 """
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await message.reply(help_text)
 
 
-async def cmd_setadmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_setadmin(client: Client, message: Message, user_id: int):
     """设置管理员"""
-    user_id = update.effective_user.id
-
     if storage.admin_id is None:
         storage.set_admin(user_id)
-        await update.message.reply_text(f"✅ 已设置你为管理员\n你的 ID: `{user_id}`", parse_mode="Markdown")
+        await message.reply(f"✅ 已设置你为管理员\n你的 ID: `{user_id}`")
     elif storage.admin_id == user_id:
-        await update.message.reply_text("你已经是管理员了")
+        await message.reply("你已经是管理员了")
     else:
-        await update.message.reply_text("❌ 管理员已存在")
+        await message.reply("❌ 管理员已存在")
 
 
-async def cmd_setsource(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_setsource(client: Client, message: Message, user_id: int):
     """设置源群组"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ 只有管理员可以使用此命令")
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
         return
 
-    chat = update.effective_chat
-    if chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("❌ 请在群组中使用此命令")
+    chat = message.chat
+    if chat.type.value not in ["group", "supergroup"]:
+        await message.reply("❌ 请在群组中使用此命令")
         return
 
     storage.set_source_group(chat.id)
-    await update.message.reply_text(
+    await message.reply(
         f"✅ 已设置源群组\n"
         f"群组: {chat.title}\n"
-        f"ID: `{chat.id}`",
-        parse_mode="Markdown"
+        f"ID: `{chat.id}`"
     )
 
 
-async def cmd_settarget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_settarget(client: Client, message: Message, user_id: int):
     """设置目标群组"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ 只有管理员可以使用此命令")
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
         return
 
-    chat = update.effective_chat
-    if chat.type not in ["group", "supergroup"]:
-        await update.message.reply_text("❌ 请在群组中使用此命令")
+    chat = message.chat
+    if chat.type.value not in ["group", "supergroup"]:
+        await message.reply("❌ 请在群组中使用此命令")
         return
 
     storage.set_target_group(chat.id)
-    await update.message.reply_text(
+    await message.reply(
         f"✅ 已设置目标群组\n"
         f"群组: {chat.title}\n"
-        f"ID: `{chat.id}`",
-        parse_mode="Markdown"
+        f"ID: `{chat.id}`"
     )
 
 
-async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_adduser(client: Client, message: Message, user_id: int, args: str):
     """添加监控用户"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ 只有管理员可以使用此命令")
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
         return
 
-    if not context.args:
-        await update.message.reply_text("用法: /adduser @username")
+    if not args:
+        await message.reply("用法: /adduser @username")
         return
 
-    username = context.args[0].lstrip("@").lower()
+    username = args.split()[0].lstrip("@").lower()
     storage.add_user(username)
-    await update.message.reply_text(f"✅ 已添加监控用户: @{username}")
+    await message.reply(f"✅ 已添加监控用户: @{username}")
 
 
-async def cmd_removeuser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_removeuser(client: Client, message: Message, user_id: int, args: str):
     """移除监控用户"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ 只有管理员可以使用此命令")
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
         return
 
-    if not context.args:
-        await update.message.reply_text("用法: /removeuser @username")
+    if not args:
+        await message.reply("用法: /removeuser @username")
         return
 
-    username = context.args[0].lstrip("@").lower()
+    username = args.split()[0].lstrip("@").lower()
     if storage.remove_user(username):
-        await update.message.reply_text(f"✅ 已移除监控用户: @{username}")
+        await message.reply(f"✅ 已移除监控用户: @{username}")
     else:
-        await update.message.reply_text(f"❌ 用户 @{username} 不在监控列表中")
+        await message.reply(f"❌ 用户 @{username} 不在监控列表中")
 
 
-async def cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_listusers(client: Client, message: Message, user_id: int):
     """列出监控用户"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ 只有管理员可以使用此命令")
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
         return
 
     if not storage.monitored_usernames:
-        await update.message.reply_text("监控列表为空")
+        await message.reply("监控列表为空")
         return
 
     users = "\n".join([f"• @{u}" for u in sorted(storage.monitored_usernames)])
-    await update.message.reply_text(f"*监控用户列表:*\n{users}", parse_mode="Markdown")
+    await message.reply(f"**监控用户列表:**\n{users}")
 
 
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_status(client: Client, message: Message, user_id: int):
     """查看当前配置"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ 只有管理员可以使用此命令")
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
         return
 
     source = f"`{storage.source_group_id}`" if storage.source_group_id else "未设置"
@@ -150,25 +187,21 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     admin = f"`{storage.admin_id}`" if storage.admin_id else "未设置"
 
     status_text = f"""
-*当前配置:*
+**当前配置:**
 • 管理员 ID: {admin}
 • 源群组 ID: {source}
 • 目标群组 ID: {target}
 • 监控用户: {users}
 
-*状态:* {"✅ 已配置完成" if storage.is_configured() else "⚠️ 配置不完整"}
+**状态:** {"✅ 已配置完成" if storage.is_configured() else "⚠️ 配置不完整"}
 """
-    await update.message.reply_text(status_text, parse_mode="Markdown")
+    await message.reply(status_text)
 
 
 # ============ 消息转发 ============
 
-async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def forward_message(client: Client, message: Message):
     """处理并转发来自监控用户的消息"""
-    message = update.message
-    if not message:
-        return
-
     # 检查配置是否完整
     if not storage.is_configured():
         return
@@ -193,5 +226,9 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     try:
         await message.forward(chat_id=storage.target_group_id)
         logger.info(f"已转发来自 @{username} 的消息")
-    except TelegramError as e:
+    except FloodWait as e:
+        logger.warning(f"触发限流，等待 {e.value} 秒")
+        await asyncio.sleep(e.value)
+        await message.forward(chat_id=storage.target_group_id)
+    except Exception as e:
         logger.error(f"转发消息失败: {e}")

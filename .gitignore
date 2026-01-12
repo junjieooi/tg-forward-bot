@@ -2,6 +2,10 @@
 .env
 bot_config.json
 
+# Pyrogram 会话文件
+*.session
+*.session-journal
+
 # Python
 __pycache__/
 *.py[cod]

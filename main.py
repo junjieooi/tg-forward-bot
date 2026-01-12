@@ -1,18 +1,8 @@
 import logging
-from telegram.ext import Application, MessageHandler, CommandHandler, filters
+from pyrogram import Client
 
 from config import Config
-from handlers import (
-    cmd_start,
-    cmd_setadmin,
-    cmd_setsource,
-    cmd_settarget,
-    cmd_adduser,
-    cmd_removeuser,
-    cmd_listusers,
-    cmd_status,
-    forward_message,
-)
+from handlers import register_handlers
 
 # 配置日志
 logging.basicConfig(
@@ -23,33 +13,27 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """启动 Bot"""
+    """启动客户端"""
     # 验证配置
     if not Config.validate():
         return
 
-    # 创建 Application
-    application = Application.builder().token(Config.BOT_TOKEN).build()
-
-    # 注册命令处理器
-    application.add_handler(CommandHandler("start", cmd_start))
-    application.add_handler(CommandHandler("help", cmd_start))
-    application.add_handler(CommandHandler("setadmin", cmd_setadmin))
-    application.add_handler(CommandHandler("setsource", cmd_setsource))
-    application.add_handler(CommandHandler("settarget", cmd_settarget))
-    application.add_handler(CommandHandler("adduser", cmd_adduser))
-    application.add_handler(CommandHandler("removeuser", cmd_removeuser))
-    application.add_handler(CommandHandler("listusers", cmd_listusers))
-    application.add_handler(CommandHandler("status", cmd_status))
-
-    # 添加消息转发处理器（处理所有非命令消息）
-    application.add_handler(
-        MessageHandler(filters.ALL & ~filters.COMMAND, forward_message)
+    # 创建 Pyrogram 客户端（用户模式）
+    app = Client(
+        name="forwarder_session",
+        api_id=Config.API_ID,
+        api_hash=Config.API_HASH,
+        phone_number=Config.PHONE_NUMBER if Config.PHONE_NUMBER else None,
+        workdir="."
     )
 
-    # 启动 Bot
-    logger.info("Bot 启动中...")
-    application.run_polling(allowed_updates=["message"])
+    # 注册处理器
+    register_handlers(app)
+
+    # 启动客户端
+    logger.info("正在启动客户端...")
+    logger.info("首次运行需要输入验证码")
+    app.run()
 
 
 if __name__ == "__main__":
