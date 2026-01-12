@@ -26,11 +26,20 @@ def register_handlers(app: Client):
     @app.on_message()
     async def handle_all_messages(client: Client, message: Message):
         """处理所有消息"""
-        # 检查是否是命令
-        if message.text and message.text.startswith("/"):
-            await handle_command(client, message)
-        else:
-            await forward_message(client, message)
+        try:
+            # 检查是否是命令
+            if message.text and message.text.startswith("/"):
+                await handle_command(client, message)
+            else:
+                await forward_message(client, message)
+        except ValueError as e:
+            # 忽略 Pyrogram 的 peer id 解析错误
+            if "Peer id invalid" in str(e):
+                pass
+            else:
+                logger.error(f"处理消息时出错: {e}")
+        except Exception as e:
+            logger.error(f"处理消息时出错: {e}")
 
 
 async def handle_command(client: Client, message: Message):
