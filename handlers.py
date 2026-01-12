@@ -2,6 +2,7 @@ import logging
 from pyrogram import Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
+from pyrogram.enums import ChatType
 import asyncio
 
 from storage import storage
@@ -12,6 +13,11 @@ logger = logging.getLogger(__name__)
 def is_admin(user_id: int) -> bool:
     """检查用户是否是管理员"""
     return storage.admin_id is None or user_id == storage.admin_id
+
+
+def is_private_chat(message: Message) -> bool:
+    """检查是否是私聊"""
+    return message.chat.type == ChatType.PRIVATE
 
 
 def register_handlers(app: Client):
@@ -36,6 +42,10 @@ async def handle_command(client: Client, message: Message):
 
     user_id = message.from_user.id if message.from_user else 0
 
+    # 只允许在私聊中执行管理命令（或管理员在任何地方）
+    if not is_private_chat(message) and not is_admin(user_id):
+        return
+
     if command == "/start" or command == "/help":
         await cmd_start(client, message)
     elif command == "/setadmin":
@@ -52,6 +62,10 @@ async def handle_command(client: Client, message: Message):
         await cmd_listusers(client, message, user_id)
     elif command == "/status":
         await cmd_status(client, message, user_id)
+    elif command == "/pause":
+        await cmd_pause(client, message, user_id)
+    elif command == "/resume":
+        await cmd_resume(client, message, user_id)
 
 
 # ============ 管理命令 ============
@@ -69,6 +83,8 @@ async def cmd_start(client: Client, message: Message):
 /removeuser @username - 移除监控用户
 /listusers - 查看监控用户列表
 /status - 查看当前配置
+/pause - 暂停转发
+/resume - 恢复转发
 /help - 显示此帮助
 
 **使用流程:**
@@ -98,7 +114,7 @@ async def cmd_setsource(client: Client, message: Message, user_id: int):
         return
 
     chat = message.chat
-    if chat.type.value not in ["group", "supergroup"]:
+    if chat.type not in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await message.reply("❌ 请在群组中使用此命令")
         return
 
@@ -117,7 +133,7 @@ async def cmd_settarget(client: Client, message: Message, user_id: int):
         return
 
     chat = message.chat
-    if chat.type.value not in ["group", "supergroup"]:
+    if chat.type not in [ChatType.GROUP, ChatType.SUPERGROUP]:
         await message.reply("❌ 请在群组中使用此命令")
         return
 
@@ -185,6 +201,7 @@ async def cmd_status(client: Client, message: Message, user_id: int):
     target = f"`{storage.target_group_id}`" if storage.target_group_id else "未设置"
     users = ", ".join([f"@{u}" for u in storage.monitored_usernames]) or "无"
     admin = f"`{storage.admin_id}`" if storage.admin_id else "未设置"
+    paused = "⏸️ 已暂停" if storage.is_paused else "▶️ 运行中"
 
     status_text = f"""
 **当前配置:**
@@ -192,16 +209,47 @@ async def cmd_status(client: Client, message: Message, user_id: int):
 • 源群组 ID: {source}
 • 目标群组 ID: {target}
 • 监控用户: {users}
+• 转发状态: {paused}
 
 **状态:** {"✅ 已配置完成" if storage.is_configured() else "⚠️ 配置不完整"}
 """
     await message.reply(status_text)
 
 
+async def cmd_pause(client: Client, message: Message, user_id: int):
+    """暂停转发"""
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
+        return
+
+    if storage.is_paused:
+        await message.reply("已经是暂停状态")
+    else:
+        storage.pause()
+        await message.reply("⏸️ 已暂停转发")
+
+
+async def cmd_resume(client: Client, message: Message, user_id: int):
+    """恢复转发"""
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
+        return
+
+    if not storage.is_paused:
+        await message.reply("已经在运行中")
+    else:
+        storage.resume()
+        await message.reply("▶️ 已恢复转发")
+
+
 # ============ 消息转发 ============
 
 async def forward_message(client: Client, message: Message):
     """处理并转发来自监控用户的消息"""
+    # 检查是否暂停
+    if storage.is_paused:
+        return
+
     # 检查配置是否完整
     if not storage.is_configured():
         return
@@ -222,13 +270,91 @@ async def forward_message(client: Client, message: Message):
     if username.lower() not in storage.monitored_usernames:
         return
 
-    # 转发消息到目标群
+    # 构建转发消息
     try:
-        await message.forward(chat_id=storage.target_group_id)
+        prefix = f"@{username}: "
+
+        if message.text:
+            # 纯文字消息
+            await client.send_message(
+                chat_id=storage.target_group_id,
+                text=prefix + message.text
+            )
+        elif message.photo:
+            # 图片
+            caption = prefix + (message.caption or "")
+            await client.send_photo(
+                chat_id=storage.target_group_id,
+                photo=message.photo.file_id,
+                caption=caption
+            )
+        elif message.video:
+            # 视频
+            caption = prefix + (message.caption or "")
+            await client.send_video(
+                chat_id=storage.target_group_id,
+                video=message.video.file_id,
+                caption=caption
+            )
+        elif message.document:
+            # 文件
+            caption = prefix + (message.caption or "")
+            await client.send_document(
+                chat_id=storage.target_group_id,
+                document=message.document.file_id,
+                caption=caption
+            )
+        elif message.audio:
+            # 音频
+            caption = prefix + (message.caption or "")
+            await client.send_audio(
+                chat_id=storage.target_group_id,
+                audio=message.audio.file_id,
+                caption=caption
+            )
+        elif message.voice:
+            # 语音
+            await client.send_voice(
+                chat_id=storage.target_group_id,
+                voice=message.voice.file_id,
+                caption=prefix
+            )
+        elif message.video_note:
+            # 视频圈
+            await client.send_message(
+                chat_id=storage.target_group_id,
+                text=prefix + "[视频圈]"
+            )
+            await client.send_video_note(
+                chat_id=storage.target_group_id,
+                video_note=message.video_note.file_id
+            )
+        elif message.sticker:
+            # 贴纸
+            await client.send_message(
+                chat_id=storage.target_group_id,
+                text=prefix + "[贴纸]"
+            )
+            await client.send_sticker(
+                chat_id=storage.target_group_id,
+                sticker=message.sticker.file_id
+            )
+        elif message.animation:
+            # GIF
+            caption = prefix + (message.caption or "")
+            await client.send_animation(
+                chat_id=storage.target_group_id,
+                animation=message.animation.file_id,
+                caption=caption
+            )
+        else:
+            # 其他类型，尝试转发
+            await message.forward(chat_id=storage.target_group_id)
+
         logger.info(f"已转发来自 @{username} 的消息")
+
     except FloodWait as e:
         logger.warning(f"触发限流，等待 {e.value} 秒")
         await asyncio.sleep(e.value)
-        await message.forward(chat_id=storage.target_group_id)
     except Exception as e:
         logger.error(f"转发消息失败: {e}")

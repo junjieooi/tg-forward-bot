@@ -1,8 +1,10 @@
 import json
 import os
+import logging
 from typing import Set, Optional
 
 CONFIG_FILE = "bot_config.json"
+logger = logging.getLogger(__name__)
 
 
 class Storage:
@@ -13,6 +15,7 @@ class Storage:
         self.target_group_id: Optional[int] = None
         self.monitored_usernames: Set[str] = set()
         self.admin_id: Optional[int] = None
+        self.is_paused: bool = False
         self._load()
 
     def _load(self):
@@ -25,8 +28,9 @@ class Storage:
                     self.target_group_id = data.get("target_group_id")
                     self.monitored_usernames = set(data.get("monitored_usernames", []))
                     self.admin_id = data.get("admin_id")
-            except Exception:
-                pass
+                    self.is_paused = data.get("is_paused", False)
+            except Exception as e:
+                logger.error(f"加载配置文件失败: {e}")
 
     def _save(self):
         """保存配置到 JSON 文件"""
@@ -35,9 +39,13 @@ class Storage:
             "target_group_id": self.target_group_id,
             "monitored_usernames": list(self.monitored_usernames),
             "admin_id": self.admin_id,
+            "is_paused": self.is_paused,
         }
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"保存配置文件失败: {e}")
 
     def set_source_group(self, group_id: int):
         self.source_group_id = group_id
@@ -62,6 +70,14 @@ class Storage:
             self._save()
             return True
         return False
+
+    def pause(self):
+        self.is_paused = True
+        self._save()
+
+    def resume(self):
+        self.is_paused = False
+        self._save()
 
     def is_configured(self) -> bool:
         return bool(self.source_group_id and self.target_group_id and self.monitored_usernames)

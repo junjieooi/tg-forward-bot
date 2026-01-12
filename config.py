@@ -5,7 +5,7 @@ load_dotenv()
 
 
 class Config:
-    API_ID: str = os.getenv("API_ID", "")
+    API_ID: int = int(os.getenv("API_ID", "0"))
     API_HASH: str = os.getenv("API_HASH", "")
     PHONE_NUMBER: str = os.getenv("PHONE_NUMBER", "")
 
