@@ -75,6 +75,10 @@ async def handle_command(client: Client, message: Message):
         await cmd_pause(client, message, user_id)
     elif command == "/resume":
         await cmd_resume(client, message, user_id)
+    elif command == "/setsourceid":
+        await cmd_setsourceid(client, message, user_id, args)
+    elif command == "/settargetid":
+        await cmd_settargetid(client, message, user_id, args)
 
 
 # ============ 管理命令 ============
@@ -88,6 +92,8 @@ async def cmd_start(client: Client, message: Message):
 /setadmin - 设置自己为管理员（仅首次）
 /setsource - 设置源群组（在源群中发送）
 /settarget - 设置目标群组（在目标群中发送）
+/setsourceid ID - 用 ID 设置源群组
+/settargetid ID - 用 ID 设置目标群组
 /adduser @username - 添加监控用户
 /removeuser @username - 移除监控用户
 /listusers - 查看监控用户列表
@@ -97,9 +103,9 @@ async def cmd_start(client: Client, message: Message):
 /help - 显示此帮助
 
 **使用流程:**
-1. 私聊自己发送 /setadmin 设置管理员
-2. 在源群发送 /setsource
-3. 在目标群发送 /settarget
+1. 私聊发送 /setadmin 设置管理员
+2. 发送 /setsourceid 群组ID（或在源群发 /setsource）
+3. 发送 /settargetid 群组ID（或在目标群发 /settarget）
 4. 用 /adduser @xxx 添加要监控的用户
 """
     await message.reply(help_text)
@@ -223,6 +229,42 @@ async def cmd_status(client: Client, message: Message, user_id: int):
 **状态:** {"✅ 已配置完成" if storage.is_configured() else "⚠️ 配置不完整"}
 """
     await message.reply(status_text)
+
+
+async def cmd_setsourceid(client: Client, message: Message, user_id: int, args: str):
+    """通过 ID 设置源群组"""
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
+        return
+
+    if not args:
+        await message.reply("用法: /setsourceid -1001234567890")
+        return
+
+    try:
+        group_id = int(args.split()[0])
+        storage.set_source_group(group_id)
+        await message.reply(f"✅ 已设置源群组 ID: `{group_id}`")
+    except ValueError:
+        await message.reply("❌ 无效的群组 ID")
+
+
+async def cmd_settargetid(client: Client, message: Message, user_id: int, args: str):
+    """通过 ID 设置目标群组"""
+    if not is_admin(user_id):
+        await message.reply("❌ 只有管理员可以使用此命令")
+        return
+
+    if not args:
+        await message.reply("用法: /settargetid -1001234567890")
+        return
+
+    try:
+        group_id = int(args.split()[0])
+        storage.set_target_group(group_id)
+        await message.reply(f"✅ 已设置目标群组 ID: `{group_id}`")
+    except ValueError:
+        await message.reply("❌ 无效的群组 ID")
 
 
 async def cmd_pause(client: Client, message: Message, user_id: int):
